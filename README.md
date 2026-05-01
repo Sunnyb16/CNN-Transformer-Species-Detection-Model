@@ -1,54 +1,151 @@
-# 🐦 Bird Audio Classification with Mel Spectrograms + ResNet
+# 🐦 Bird Audio Classification — Project Overview
 
-This repository implements a deep learning pipeline for **multi-label bird species classification** from raw audio using **mel spectrogram representations** and a fine-tuned **ResNet-18 architecture**.
-
----
-
-## 📌 Overview
-
-Environmental audio is inherently noisy, non-stationary, and high-dimensional. This project transforms raw audio into structured time-frequency representations and leverages convolutional neural networks to learn discriminative acoustic patterns.
-
-**Pipeline:**
-
-Raw Audio → Mel Spectrogram → CNN (ResNet-18) → Multi-label Predictions
+This project builds a deep learning system for **multi-label bird species classification** from raw environmental audio. The core idea is to transform raw waveforms into **mel spectrograms**, which provide a structured time–frequency representation, and then use a **convolutional neural network (ResNet-18)** to learn discriminative acoustic features.
 
 ---
 
-## 🧠 Model Architecture
+##  Problem Setup
 
-The core model is a modified **ResNet-18** adapted for audio input:
+Given an audio signal:
+  
+x[n] ∈ ℝ  
 
-- Input channels changed from **3 → 1** (spectrograms are single-channel)
-- Pretrained weights used for transfer learning
-- Custom classification head:
-  - BatchNorm
-  - Dropout
-  - Linear layer → multi-label outputs
+we aim to predict a vector of probabilities:
 
-### Implementation
+y ∈ [0,1]^C  
 
-```python
-import torch
-import torch.nn as nn
-import torchvision.models as models
+where C is the number of bird species and each entry represents the probability that a species is present in the clip.
 
-class BirdResNet(nn.Module):
-    def __init__(self, num_classes, dropout=0.2):
-        super().__init__()
+This is a **multi-label classification problem** (not mutually exclusive classes).
 
-        self.model = models.resnet18(pretrained=True)
+---
 
-        # Modify first layer for 1-channel input
-        self.model.conv1 = nn.Conv2d(
-            1, 64, kernel_size=7, stride=2, padding=3, bias=False
-        )
+## 🎧 Signal Processing Pipeline
 
-        # Replace classification head
-        self.model.fc = nn.Sequential(
-            nn.BatchNorm1d(self.model.fc.in_features),
-            nn.Dropout(p=dropout),
-            nn.Linear(self.model.fc.in_features, num_classes)
-        )
+### 1. Short-Time Fourier Transform (STFT)
 
-    def forward(self, x):
-        return self.model(x)
+We first convert the 1D time-domain signal into a time-frequency representation:
+
+X(t, ω) = Σ x[n] · w[n − t] · e^(−iωn)
+
+Where:
+- w[n] is a window function  
+- t is time  
+- ω is frequency  
+
+---
+
+### 2. Power Spectrogram
+
+We compute the energy at each time-frequency bin:
+
+|X(t, ω)|^2
+
+---
+
+### 3. Mel Frequency Mapping
+
+Human perception of sound is nonlinear, so we map frequencies to the mel scale:
+
+m(f) = 2595 · log10(1 + f / 700)
+
+---
+
+### 4. Mel Filter Bank Projection
+
+We apply triangular filters over the frequency axis:
+
+S_mel(t, m) = Σ |X(t, ω)|^2 · H_m(ω)
+
+Where:
+- H_m(ω) is the m-th mel filter  
+
+---
+
+### 5. Log Scaling
+
+Final input to the model:
+
+S_log(t, m) = log(S_mel(t, m) + ε)
+
+This stabilizes variance and improves training.
+
+---
+
+##  Model
+
+The model is a modified ResNet-18:
+
+f_θ : ℝ^(T × M) → ℝ^C  
+
+Where:
+- T = time frames  
+- M = mel bins  
+- C = number of classes  
+
+Output logits:
+
+z = f_θ(x)
+
+---
+
+## 🎯 Prediction Layer
+
+Apply sigmoid activation:
+
+ŷ = σ(z)
+
+σ(z) = 1 / (1 + e^(−z))
+
+Each output is an independent probability for each class.
+
+---
+
+##  Loss Function
+
+Binary Cross Entropy (multi-label):
+
+L = − Σ [ y log(ŷ) + (1 − y) log(1 − ŷ) ]
+
+Equivalently with logits:
+
+L = − Σ [ y log(σ(z)) + (1 − y) log(1 − σ(z)) ]
+
+---
+
+##  Optimization
+
+Parameters θ are optimized via gradient descent:
+
+θ ← θ − η ∇_θ L
+
+Using:
+- AdamW optimizer  
+- Learning rate scheduling  
+
+---
+
+##  Key Intuition
+
+- Audio → spectrogram converts raw signal into structured features  
+- Mel scaling emphasizes perceptually relevant frequencies  
+- CNN learns spatial patterns (time × frequency)  
+- Multi-label sigmoid allows overlapping bird calls  
+
+---
+
+##  Summary
+
+This pipeline combines:
+
+Signal Processing:
+- STFT  
+- Mel filter banks  
+- Log scaling  
+
+Machine Learning:
+- Convolutional neural networks  
+- Multi-label classification  
+- Probabilistic outputs via sigmoid  
+
+to solve a challenging real-world problem: **identifying multiple bird species in noisy soundscapes**.
